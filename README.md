@@ -8,16 +8,10 @@ A Reverse Proxy server sits between your server side code and clients that are r
 
 Put visually, consider a very very simple web application architecture flow:
 
-```
-Client (Browser)     --------- (req) ---->     Web server (Node.js)    --------- (res) ---->     Client
-```
+![web-diagram-basic](https://www.lucidchart.com/publicSegments/view/5571f786-0cd4-41d8-b601-65ae0a004692/image.png)
 
 If we had multiple Node apps running on our web server, we wouldn't be able to utilize them as only one app can listen on port 80 at any given time.
 
 Let's consider the above example again, this time with two Node apps running on a single web server:
 
-```
-
-Client (Browser)     ----- (req) -->     Reverse proxy HTTP (nginx) ---/ Node app A
-Client (Browser)     ----- (req) -->     Reverse proxy HTTP (nginx) ---/ Node app B
-```
+![web-diagram-advanced](https://www.lucidchart.com/publicSegments/view/5571f995-0ef0-48f0-814e-57df0a00c920/image.png)
