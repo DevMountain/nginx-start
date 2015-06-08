@@ -77,26 +77,184 @@ server {
 
   listen 80;
 
-  server_name favorite-places.com localhost;
+  server_name favorite-places.com;
     
   location / {
     proxy_pass         http://127.0.0.1:1337/;
     proxy_redirect     off;
 
-    proxy_set_header   Host             $host;
-    proxy_set_header   X-Real-IP        $remote_addr;
-    proxy_set_header   X-Forwarded-For  $proxy_add_x_forwarded_for;
+    proxy_set_header   Host              $http_host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_set_header   X-NginX-Proxy     true;
+    proxy_http_version 1.1;
+    proxy_cache_key   "$scheme$host$request_method$request_uri";
   }
 
 }
 ```
 
+OK, so what's going on here? You can think of the code above sort of like a JSON object. The syntax is obviously different, but the principle is the same: we have keys (directives) and values. You can probably guess what some of these do. `listen` tells nginx to listen on port 80 for this particular block. `server_name` tells nginx what domain requests will be caught by this server block. You can have multiple server blocks (we'll go over that in a second).
+
+The `location` directive essentially redirects all traffice (hence the `/`) from the favorite-places.com domain to our Node app running at localhost (127.0.0.1:1337). The rest of the options allow our proxy server to respond to requests correctly.
+
 ## Using nginx and HTTPS
+
+To use HTTPS on your domain, there are a few steps that you'll need to go through:
+1. Purchase a SSL certificate from a place like [Namecheap](http://www.namecheap.com/?aff=87614). What this means is that a third party (in this case, Namecheap) is going to be the trusted party that will tell the client (your customer + his/her browser) that you are to be trusted and that communications between him/her and your service will be encrypted. 
+2. Install the SSL certificate. This process requires a few steps:
+  1. Generate a CSR and a private key. Follow [this tutorial](https://www.digitalocean.com/community/tutorials/how-to-install-an-ssl-certificate-from-a-commercial-certificate-authority), starting with the section entitled "Generate a CSR and Private Key." *Keep in mind, this must be done from your server, not your local machine*.
+  2. Validate your domain. With Namecheap, they will want to contact someone registered on your domain that is authorized to validate the SSL certificate for your domain. This is usually an adminstrative contact, and you might have to edit the publicly viewable information on your domain records so that it will contact the correct person.
+  3. Activate your SSL certificate. This is usually done on the certificate authority's website (in our example, Namecheap). You'll paste the CSR you created a couple steps ago into the web interface for Namecheap (or your authority) and it will be ready to go.
+  4. Download and install your certificate. You should end up with an email at the end of this process that contains a zip file with everything you need. At this point, follow [this tutorial](https://aralbalkan.com/scribbles/setting-up-ssl-with-nginx-using-a-namecheap-essentialssl-wildcard-certificate-on-digitalocean/) starting with the section entitled "Create a certificate bundle" so that you combine the materials given to you from Namecheap in a way that your server and nginx understand. You'll want to upload the resulting files to your server *before* you unzip and combine them as described in this step. You can do this with scp:
+
+```
+scp /my/local/path/to/zip root@122.522.355.345:/destination/path
+```
+
+Once you have that ready, here's how your config might look to support HTTPS:
+
+```
+server {
+  listen 80;
+
+  server_name favorite-places.com;
+  return 301 https://favorite-places.com$request_uri;
+
+}
+
+server {
+
+  listen 443 ssl;
+  server_name favorite-places.com;
+
+  ssl on;
+  ssl_certificate /certs/bundle.crt; #bundle created from step above
+  ssl_certificate_key /certs/favorite-places.com.key; #key generated from server in steps above
+
+  #enables SSLv3/TLSv1, but not SSLv2 which is weak and should no longer be used.
+  ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+  #Disables all weak ciphers
+  ssl_ciphers ALL:!aNULL:!ADH:!eNULL:!LOW:!EXP:RC4+RSA:+HIGH:+MEDIUM;
+
+  location / {
+    proxy_pass         http://127.0.0.1:3001;
+    proxy_redirect     off;
+
+    proxy_set_header   Host              $http_host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_set_header   X-NginX-Proxy     true;
+    proxy_http_version 1.1;
+    proxy_cache_key   "$scheme$host$request_method$request_uri";
+  }
+}
+```
+
+So, this is obviously a lot more configuration than before. Most of this are just default options for setting up SSL.
+
+One thing to note in the configuration above is that we are now redirecting all non-HTTPS traffic to HTTPS only (see the 301 redirect in the first server block). This is because duplicating content on HTTP and HTTPS can cause problems with search engines. For example, Google can penalize you if you have the same content on HTTP as you do on HTTPS, because they consider them separate sites. Dumb, I know.
+
+Some additional resources:
+* [How to create an SSL on Nginx for Ubuntu](https://www.digitalocean.com/community/tutorials/how-to-create-a-ssl-certificate-on-nginx-for-ubuntu-12-04)
+* [How To Install an SSL Certificate from a Commercial Certificate Authority](https://www.digitalocean.com/community/tutorials/how-to-install-an-ssl-certificate-from-a-commercial-certificate-authority)
+* [Setting up SSL with nginx (DigitalOcean)](https://aralbalkan.com/scribbles/setting-up-ssl-with-nginx-using-a-namecheap-essentialssl-wildcard-certificate-on-digitalocean/)
 
 ## Using nginx to serve static assets
 
+Let's talk about how we can add configuration to our server blocks (HTTPS or HTTP) to bypass Express and serve static files directly.
+
+```
+server {
+  listen 80;
+
+  server_name favorite-places.com;
+
+  location ~* \.(gif|jpg|png|js|css)$ {
+    root `/home/root/code/public;
+  }
+  
+  location / {
+    proxy_pass         http://127.0.0.1:1337/;
+    proxy_redirect     off;
+
+    proxy_set_header   Host              $http_host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_set_header   X-NginX-Proxy     true;
+    proxy_http_version 1.1;
+    proxy_cache_key   "$scheme$host$request_method$request_uri";
+  }
+  
+}
+```
+The relevant new directives here is the new `location` directive.
+
+`location` in this case uses regular expression (REGEX) to detect if the requesting URL has a filepath that matches an asset (images, Javascript or CSS). You could add any other file extensions to this list (PDF, .move, etc). If nginx sees that a client is requesting a resource that has one of these extensions, it will automatically look in the speficied folder (in this case `/home/root/code/public`) for the matching file before moving on. 
+
+Doing the above can result in faster static file serving and can reduce the load on your Node application (makes your app more scalable).
+
 ## Using nginx to host multiple apps on one server
 
+It's not very difficult to get nginx ready to handle multiple domains. Check out the config below:
 
+```
+
+server {
+
+  listen 80;
+
+  server_name favorite-places.com;
+    
+  location / {
+    proxy_pass         http://127.0.0.1:1337/;
+    proxy_redirect     off;
+
+    proxy_set_header   Host              $http_host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_set_header   X-NginX-Proxy     true;
+    proxy_http_version 1.1;
+    proxy_cache_key   "$scheme$host$request_method$request_uri";
+  }
+
+}
+
+server {
+
+  listen 80;
+
+  server_name awesome-dating.com;
+    
+  location / {
+    proxy_pass         http://127.0.0.1:1338/;
+    proxy_redirect     off;
+
+    proxy_set_header   Host              $http_host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_set_header   X-NginX-Proxy     true;
+    proxy_http_version 1.1;
+    proxy_cache_key   "$scheme$host$request_method$request_uri";
+  }
+
+}
+```
+
+Really, all we had to change in the config was to add a new server block with a different server_name and a different port. We can't have two Node applications listening on the same port.
+
+For the above to work, make sure you've done the following:
+* Purchase both domains and pointed their nameservers to the same droplet or server instance (IP address)
+* Register DNS records on your host to watch for both domains. (In DigitalOcean this means creating two domains and pointing them to the same droplet.)
+
+
+## Some additional resources
 
 [DigitalOcean tutorial on nginx](https://www.digitalocean.com/community/tutorials/how-to-set-up-nginx-virtual-hosts-server-blocks-on-ubuntu-12-04-lts--3)
+[How To Set Up a Host Name with DigitalOcean](https://www.digitalocean.com/community/tutorials/how-to-set-up-a-host-name-with-digitalocean)
+
